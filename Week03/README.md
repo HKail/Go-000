@@ -6,9 +6,24 @@
 
 ## 作业内容
 
-通过`errgroup`的源码，可以发现其`WithContext`会返回一个`WithCancel`的`Context`，并且，当`errgroup`的`Wait`方法结束后，会自动调用该`Context`的`cancel`方法。因此，当清楚了`errgroup`的基本工作原理后，本次作业即可使用`WithContext`和`Wait`结合，解决~
+通过`errgroup`的源码，可以发现其`WithContext`会返回一个`WithCancel`的`Context`，并且，该`Context`会在传递给`Go`方法中的函数返回一个`non-nil`的`error`或`Wait`方法等待结束时，第一时间被`cancel`。因此，可以利用`errgroup`的这个特性，完成本次作业~
+
+`errgroup`源码如下：
 
 ```go
+// A Group is a collection of goroutines working on subtasks that are part of
+// the same overall task.
+//
+// A zero Group is valid and does not cancel on error.
+type Group struct {
+	cancel func()
+
+	wg sync.WaitGroup
+
+	errOnce sync.Once
+	err     error
+}
+
 // WithContext returns a new Group and an associated Context derived from ctx.
 //
 // The derived Context is canceled the first time a function passed to Go
@@ -27,6 +42,27 @@ func (g *Group) Wait() error {
 		g.cancel()
 	}
 	return g.err
+}
+
+// Go calls the given function in a new goroutine.
+//
+// The first call to return a non-nil error cancels the group; its error will be
+// returned by Wait.
+func (g *Group) Go(f func() error) {
+	g.wg.Add(1)
+
+	go func() {
+		defer g.wg.Done()
+
+		if err := f(); err != nil {
+			g.errOnce.Do(func() {
+				g.err = err
+				if g.cancel != nil {
+					g.cancel()
+				}
+			})
+		}
+	}()
 }
 ```
 
